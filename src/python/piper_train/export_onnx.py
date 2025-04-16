@@ -45,10 +45,15 @@ def main() -> None:
     # Load checkpoint with weights_only=False
     checkpoint = torch.load(args.checkpoint, weights_only=False)
     
+    # Get number of speakers from checkpoint
+    state_dict = checkpoint['state_dict']
+    num_speakers = state_dict['model_g.emb_g.weight'].shape[0]
+    _LOGGER.info("Number of speakers in checkpoint: %d", num_speakers)
+    
     # Create model with required parameters
     model = VitsModel(
         num_symbols=256,  # Will be updated from checkpoint
-        num_speakers=10,  # Multi speaker model
+        num_speakers=num_speakers,  # Use actual number of speakers
         sample_rate=22050,
         dataset=None,
         hidden_channels=192,
