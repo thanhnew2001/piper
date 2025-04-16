@@ -39,11 +39,42 @@ def main() -> None:
     args.output = Path(args.output)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    model = VitsModel.load_from_checkpoint(args.checkpoint, dataset=None)
+    # Add PosixPath to safe globals for checkpoint loading
+    torch.serialization.add_safe_globals([Path])
+    
+    # Load checkpoint with weights_only=False
+    checkpoint = torch.load(args.checkpoint, weights_only=False)
+    
+    # Create model with required parameters
+    model = VitsModel(
+        num_symbols=256,  # Will be updated from checkpoint
+        num_speakers=1,   # Single speaker model
+        sample_rate=22050,
+        dataset=None,
+        hidden_channels=192,
+        inter_channels=192,
+        filter_channels=768,
+        n_layers=6,
+        n_heads=2,
+        plot_save_path=None,
+        show_plot=False
+    )
+    
+    # Filter out speaker-related weights from state dict
+    state_dict = checkpoint['state_dict']
+    filtered_state_dict = {}
+    for key, value in state_dict.items():
+        # Skip speaker embedding weights
+        if any(x in key for x in ['emb_g.weight', 'cond.weight', 'cond.bias', 'cond_layer']):
+            continue
+        filtered_state_dict[key] = value
+    
+    # Load filtered state dict
+    model.load_state_dict(filtered_state_dict, strict=False)
+    
     model_g = model.model_g
 
     num_symbols = model_g.n_vocab
-    num_speakers = model_g.n_speakers
 
     # Inference only
     model_g.eval()
@@ -55,7 +86,7 @@ def main() -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model_g.to(device)
 
-    def infer_forward(text, text_lengths, scales, sid=None):
+    def infer_forward(text, text_lengths, scales):
         noise_scale = scales[0]
         length_scale = scales[1]
         noise_scale_w = scales[2]
@@ -64,8 +95,7 @@ def main() -> None:
             text_lengths,
             noise_scale=noise_scale,
             length_scale=length_scale,
-            noise_scale_w=noise_scale_w,
-            sid=sid,
+            noise_scale_w=noise_scale_w
         )[0].unsqueeze(1)
 
         return audio
@@ -78,13 +108,9 @@ def main() -> None:
     ).to(device)
     sequence_lengths = torch.LongTensor([sequences.size(1)]).to(device)
 
-    sid: Optional[torch.LongTensor] = None
-    if num_speakers > 1:
-        sid = torch.LongTensor([0]).to(device)
-
     # noise, noise_w, length
     scales = torch.FloatTensor([0.667, 1.0, 0.8]).to(device)
-    dummy_input = (sequences, sequence_lengths, scales, sid)
+    dummy_input = (sequences, sequence_lengths, scales)
 
     # Export
     torch.onnx.export(
@@ -93,7 +119,7 @@ def main() -> None:
         f=str(args.output),
         verbose=False,
         opset_version=OPSET_VERSION,
-        input_names=["input", "input_lengths", "scales", "sid"],
+        input_names=["input", "input_lengths", "scales"],
         output_names=["output"],
         dynamic_axes={
             "input": {0: "batch_size", 1: "phonemes"},
