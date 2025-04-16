@@ -8,6 +8,7 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping, LearningRateMonitor
 
 from .vits.lightning import VitsModel
+from load_checkpoint import load_checkpoint
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -220,6 +221,7 @@ def main():
         **dict_args,
     )
 
+# Replace the model loading line
     if args.resume_from_single_speaker_checkpoint:
         assert (
             num_speakers > 1
@@ -230,10 +232,8 @@ def main():
             "Resuming from single-speaker checkpoint: %s",
             args.resume_from_single_speaker_checkpoint,
         )
-        model_single = VitsModel.load_from_checkpoint(
-            args.resume_from_single_speaker_checkpoint,
-            dataset=None,
-        )
+        model_single = load_checkpoint(args.resume_from_single_speaker_checkpoint)
+
         g_dict = model_single.model_g.state_dict()
         for key in list(g_dict.keys()):
             # Remove keys that can't be copied over due to missing speaker embedding
